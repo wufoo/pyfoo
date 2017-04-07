@@ -1,9 +1,20 @@
-import urllib
-import urllib2
+try:
+    import urllib.request as urllib_request
+    import urllib.parse as urllib_parse
+    from urllib.parse import urlencode
+except:
+    import urllib as urllib_request
+    from urllib import urlencode
+    import urllib2 as urllib_parse
+
 import json
-    
-from UserList import UserList
-from UserDict import UserDict
+
+try:
+    from collections import UserList, UserDict
+
+except:
+    from UserList import UserList
+    from UserDict import UserDict
 
 BOOLEAN_FIELDS = ('IsAccountOwner', 'IsRequired', 'IsPublic', 'CreateForms', 
         'CreateReports', 'CreateThemes', 'AdminAccess', 'Success')
@@ -12,7 +23,7 @@ class WufooObject(object):
     def __init__(self, api, json_object):
         super(WufooObject, self).__init__()
         self.api = api
-        for key in json_object.keys():
+        for key in list(json_object.keys()):
             if isinstance(json_object[key], list):
                 sub_list = []
                 for sub_json in json_object[key]:
@@ -40,9 +51,9 @@ class Entry(UserDict):
         else:
             self.data = {}
         self.form = form
-        if not self.has_key('LastUpdated'):
+        if 'LastUpdated' not in self:
             self['LastUpdated'] = None
-        if not self.has_key('LastUpdatedBy'):
+        if 'LastUpdatedBy' not in self:
             self['LastUpdatedBy'] = None
     
     @property
@@ -77,7 +88,7 @@ class Form(WufooObject):
         for index in range(len(parameters)):
             param = parameters[index]
             output['Filter%s' % (index + 1)] = "%s__%s__%s" % (param.field, param.operator, param.value)
-        filter_string = urllib.urlencode(output).replace('__', '+')
+        filter_string = urlencode(output).replace('__', '+')
         return self.get_entries(filter_string=filter_string)
 
     def get_entries(self, page_start=0, page_size=100, sort_field='DateCreated', sort_direction='DESC', filter_string=None):
@@ -124,9 +135,9 @@ class Form(WufooObject):
     def add_entry(self, entry):
         post_params = {}
         for field in self.fields:
-            if entry.has_key(field.Title):
+            if field.Title in entry:
                 post_params[field.ID] = entry[field.Title]
-            elif entry.has_key(field.ID):
+            elif field.ID in entry:
                 post_params[field.ID] = entry[field.ID]
         url = 'https://%s.wufoo.com/api/v3/forms/%s/entries.json' % (self.api.account, self.Hash)
         response_json = self.api.make_call(url, post_params=post_params)
@@ -186,7 +197,7 @@ class Report(WufooObject):
     def fields(self):
         if not hasattr(self, '_fields'):
             fields_json = self.api.make_call(self.LinkFields)
-            self._fields = [Field(self.api, field) for field in fields_json['Fields'].values()]
+            self._fields = [Field(self.api, field) for field in list(fields_json['Fields'].values())]
         return self._fields
         
     @property
@@ -226,9 +237,17 @@ class Comment(WufooObject):
     pass
         
 class PyfooAPI(object):
-    def __init__(self, account=None, api_key=None, email=None, password=None, integration_key=None):
+    def __init__(self,
+        account=None,
+        api_key=None,
+        email=None,
+        password=None,
+        integration_key=None,
+        test_json_dir=None):
+
         self.account = account
         self.api_key = api_key
+        self.test_json_dir = test_json_dir
         if email and password:
             url = 'https://wufoo.com/api/v3/login.json'
             data = {'email': email, 'password': password, 'integrationKey': integration_key}
@@ -240,19 +259,19 @@ class PyfooAPI(object):
             self.account = response['Subdomain']
             
     def make_call(self, url, post_params=None, method=None):
-        password_mgr = urllib2.HTTPPasswordMgrWithDefaultRealm()
+        password_mgr = urllib_request.HTTPPasswordMgrWithDefaultRealm()
         if self.account:
             top_level_url = "https://%s.wufoo.com/api/v3" % self.account
         else:
             top_level_url = "https://wufoo.com/api/v3"
         password_mgr.add_password(None, top_level_url, self.api_key, "footastic")
-        handler = urllib2.HTTPBasicAuthHandler(password_mgr)
-        opener = urllib2.build_opener(handler)
-        urllib2.install_opener(opener)
+        handler = urllib_request.HTTPBasicAuthHandler(password_mgr)
+        opener = urllib_request.build_opener(handler)
+        urllib_request.install_opener(opener)
         
         if post_params:
-            data = urllib.urlencode(post_params)
-            request = urllib2.Request(url, data=data)
+            data = urllib_parse.urlencode(post_params)
+            request = urllib_request.Request(url, data=data)
             if method:
                 request.get_method = lambda: method
             response = opener.open(request)
@@ -263,16 +282,23 @@ class PyfooAPI(object):
         
         post_params_string = ''
         if post_params:
-            post_params_string = ''.join(post_params.keys())
-        test_script = open('scripts/%s%s.json' % (url.replace('/', '_'), post_params_string), 'w')
-        test_script.write(json_string)
-        test_script.close()
+            post_params_string = ''.join(list(post_params.keys()))
+
+        if self.test_json_dir:
+            with open(os.path.join(
+                    self.test_json_dir,
+                    '%s%s.json' % (url.replace('/', '_'),
+                post_params_string)
+                ), 'w' ) as test_script:
+                test_script.write(json_string)
+                test_script.close()
+
         try:
-            json_object = json.loads(json_string)
+            json_object = json.loads(json_string.decode('utf8'))
             
         except Exception as ex:
-            print url
-            print json_string
+            print(url)
+            print(json_string)
             
             raise ex
         return json_object
